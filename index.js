@@ -108,6 +108,18 @@ async function run() {
         res.send(result)
     })
 
+    // send surveys
+    app.post('/surveys', async (req, res) => {
+        try {
+             const newSurvey = req.body;
+             const result = await surveyCollection.insertOne(newSurvey);
+             res.send(result);
+        }
+        catch(error) {
+         console.log(error)
+        }
+     })
+
     // get surveys and filter by title, category, price
     app.get('/surveys', async (req, res) => {
         try {
@@ -146,6 +158,37 @@ async function run() {
             const id = req.params.id;
             const query = {_id: new ObjectId(id)}
             const result = await surveyCollection.findOne(query);
+            res.send(result);
+        }
+        catch(error) {
+            console.log(error)
+        }
+    })
+
+    // update surveys
+    app.put('/surveys/:id', async(req, res) => {
+        try {
+            const id = req.params.id;
+            const filter = {_id: new ObjectId(id)}
+            const options = { upsert: true };
+            const updatedSurvey = req.body;
+      
+            const survey = {
+                $set: {
+                    title: updatedSurvey.title, 
+                    description: updatedSurvey.description, 
+                    category: updatedSurvey.category, 
+                    deadline: updatedSurvey.deadline, 
+                    options: updatedSurvey.options, 
+                    like: updatedSurvey.like, 
+                    dislike: updatedSurvey.dislike, 
+                    report: updatedSurvey.report, 
+                    vote: updatedSurvey.vote, 
+                    votes: updatedSurvey.votes, 
+                    timestamp: updatedSurvey.timestamp, 
+                }
+            }
+            const result = await surveyCollection.updateOne(filter, survey, options);
             res.send(result);
         }
         catch(error) {
