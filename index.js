@@ -34,10 +34,30 @@ async function run() {
 
     const surveyCollection = client.db('outPollDB').collection('surveys');
 
-    // get surveys
+    // get surveys and filter by title, category, price
     app.get('/surveys', async (req, res) => {
         try {
-            const cursor = surveyCollection.find();
+            let queryObj = {}
+            let sortObj = {}
+
+            const title = req.query.title;
+            const category = req.query.category;
+            const sortField = req.query.sortField;
+            const sortOrder = req.query.sortOrder;
+
+            if(title){
+                queryObj.title = title;
+            }
+
+            if(category){
+                queryObj.category = category;
+            }
+
+            if(sortField && sortOrder){
+                sortObj[sortField] = sortOrder;
+            }
+
+            const cursor = surveyCollection.find(queryObj).sort(sortObj);
             const result = await cursor.toArray();
             res.send(result);
         } 
@@ -47,7 +67,7 @@ async function run() {
     })
 
      // get single survey
-     app.get('/surveys/:id', async(req, res) => {
+    app.get('/surveys/:id', async(req, res) => {
         try {
             const id = req.params.id;
             const query = {_id: new ObjectId(id)}
