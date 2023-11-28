@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
 const app = express();
 const port = process.env.PORT || 5000;
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 // middleware
 app.use(cors({
@@ -30,11 +31,22 @@ const client = new MongoClient(uri, {
   }
 });
 
-// create middlewares
-const logger = async (req, res, next) => {
-    console.log('log info:', req.method, req.url)
-    next();
-}
+// verify token
+const verifyToken = async (req, res, next) => {
+    const token = req.cookies?.token
+    console.log(token)
+    if (!token) {
+      return res.status(401).send({ message: 'unauthorized access' })
+    }
+    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+      if (err) {
+        console.log(err)
+        return res.status(401).send({ message: 'unauthorized access' })
+      }
+      req.user = decoded
+      next()
+    })
+  }
 
 async function run() {
   try {
@@ -43,9 +55,12 @@ async function run() {
 
     const userCollection = client.db('outPollDB').collection('users');
     const surveyCollection = client.db('outPollDB').collection('surveys');
+    const participantCollection = client.db('outPollDB').collection('participants');
+    const commentCollection = client.db('outPollDB').collection('comments');
+    const paymentCollection = client.db("outPollDB").collection("payments");
 
     // auth related api
-    app.post('/jwt', logger, async (req, res) => {
+    app.post('/jwt', async (req, res) => {
         try {
             const user = req.body;
             // console.log(user);
@@ -90,7 +105,6 @@ async function run() {
         if (existingUser) {
           return res.send({ message: 'user already exists', insertedId: null })
         }
-  
         const result = await userCollection.insertOne(user);
         res.send(result);
     });
@@ -108,6 +122,19 @@ async function run() {
         res.send(result)
     })
 
+    // update user role
+    app.patch('/users/admin/:id', verifyToken, async (req, res) => {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+        const updatedDoc = {
+            $set: {
+            role: 'surveyor'
+            }
+        }
+        const result = await userCollection.updateOne(filter, updatedDoc);
+        res.send(result);
+    })
+
     // send surveys
     app.post('/surveys', async (req, res) => {
         try {
@@ -118,41 +145,63 @@ async function run() {
         catch(error) {
          console.log(error)
         }
-     })
+    })
 
-    // get surveys and filter by title, category, price
+    // get surveys for all and filter by title, category, vote
     app.get('/surveys', async (req, res) => {
         try {
             let queryObj = {}
             let sortObj = {}
-
+    
             const title = req.query.title;
             const category = req.query.category;
             const sortField = req.query.sortField;
             const sortOrder = req.query.sortOrder;
-
-            if(title){
+    
+            if (title) {
                 queryObj.title = title;
             }
-
-            if(category){
+    
+            if (category) {
                 queryObj.category = category;
             }
-
-            if(sortField && sortOrder){
+    
+            if (sortField && sortOrder) {
                 sortObj[sortField] = sortOrder;
             }
-
+    
             const cursor = surveyCollection.find(queryObj).sort(sortObj);
-            const result = await cursor.toArray();
+            const surveys = await cursor.toArray();
+    
+            const voteCounts = await participantCollection.aggregate([
+                {
+                    $group: {
+                        _id: '$title',
+                        totalVotes: { $sum: 1 }
+                    }
+                }
+            ]).toArray();
+    
+            const result = surveys.map(survey => {
+                const vote = voteCounts.find(vote => vote._id === survey.title);
+                const votesCount = vote ? vote.totalVotes : 0;
+                return { ...survey, votes: votesCount };
+            });
+    
             res.send(result);
-        } 
-        catch(error) {
-            console.log(error)
+        } catch (error) {
+            console.log(error);
         }
-    })
+    });
 
-     // get single survey
+    // get survey for surveyor
+    app.get('/surveys/surveyor/:email', async (req, res) => {
+        const email = req.params.email
+        const result = await surveyCollection.find({ 'surveyor': email }).toArray()
+        res.send(result)
+      })
+
+    // get single survey
     app.get('/surveys/:id', async(req, res) => {
         try {
             const id = req.params.id;
@@ -195,6 +244,205 @@ async function run() {
             console.log(error)
         }
     })
+
+     // update survey status
+     app.patch('/surveys/admin/:id', verifyToken, async (req, res) => {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+        const updatedDoc = {
+            $set: {
+            status: 'unpublish'
+            }
+        }
+        const result = await surveyCollection.updateOne(filter, updatedDoc);
+        res.send(result);
+    })
+
+    // Send participants
+    app.post('/participants', async (req, res) => {
+        try {
+            const participantSurvey = req.body;
+    
+            const existingEntry = await participantCollection.findOne({
+                participant_email: participantSurvey.participant_email,
+                title: participantSurvey.title
+            });
+    
+            if (existingEntry) {
+                const updatedFields = {};
+    
+                if (participantSurvey.like !== undefined) {
+                    updatedFields.like = participantSurvey.like;
+                }
+    
+                if (participantSurvey.dislike !== undefined) {
+                    updatedFields.dislike = participantSurvey.dislike;
+                }
+    
+                if (participantSurvey.report !== undefined) {
+                    updatedFields.report = participantSurvey.report;
+                }
+    
+                await participantCollection.updateOne(
+                    { _id: existingEntry._id },
+                    { $set: updatedFields }
+                );
+    
+                return res.status(200).json({ message: 'updated successfully' });
+            }
+    
+            // If the user hasn't participated yet, insert the new entry
+            const result = await participantCollection.insertOne(participantSurvey);
+            res.send(result);
+        } catch (error) {
+            console.log(error);
+        }
+    });
+    
+    // get all participants
+    app.get('/participants', async (req, res) => {
+        const result = await participantCollection.find().toArray();
+        res.send(result);
+    });
+
+    // get single participants
+    app.get('/participants/:email', async(req, res) => {
+        try {
+            const email = req.params.email;
+            const result = await participantCollection.findOne({ 'participant_email': email});
+            res.send(result);
+        }
+        catch(error) {
+            console.log(error)
+        }
+    })
+
+    // send comments
+    app.post('/comments', async (req, res) => {
+        try {
+             const commentSurvey = req.body;
+             const result = await commentCollection.insertOne(commentSurvey);
+             res.send(result);
+        }
+        catch(error) {
+         console.log(error)
+        }
+    })
+
+    // get all comments
+    app.get('/comments', async (req, res) => {
+        const result = await commentCollection.find().toArray();
+        res.send(result);
+    });
+
+    // get specific comment
+    app.get('/comments/:surveyId', async (req, res) => {
+        try {
+            const surveyId = req.params.surveyId;
+            const result = await commentCollection.find({ 'surveyId': surveyId }).toArray();
+            res.send(result);
+        } catch (error) {
+            console.log(error);
+        }
+    });
+
+
+    app.get('/user-votes', verifyToken, async (req, res) => {
+        const voteCounts = await participantCollection.aggregate([
+            {
+                $group: {
+                    _id: '$title',
+                    yes: {
+                        $sum: { $arrayElemAt: ['$votes', 0] } 
+                    },
+                    no: {
+                        $sum: { $arrayElemAt: ['$votes', 1] }
+                    },
+                    totalCount: { $sum: 1 } 
+                }
+            },
+
+            {
+                $project: {
+                    _id: 0,
+                    title: '$_id',
+                    yes: 1,
+                    no: 1,
+                    totalCount: 1
+                }
+            }
+        ]).toArray();        
+        res.send({voteCounts})
+    })
+
+    app.get('/votes', verifyToken, async (req, res) => {
+        const voteCounts = await participantCollection.aggregate([
+            {
+                $group: {
+                    _id: '$participant_name',
+                    yes: {
+                        $sum: { $arrayElemAt: ['$votes', 0] } 
+                    },
+                    no: {
+                        $sum: { $arrayElemAt: ['$votes', 1] }
+                    },
+                    totalCount: { $sum: 1 } 
+                }
+            },
+
+            {
+                $project: {
+                    _id: 0,
+                    participant_name: '$_id',
+                    yes: 1,
+                    no: 1,
+                    totalCount: 1
+                }
+            }
+        ]).toArray();        
+        res.send({voteCounts})
+    })
+
+    // payment intent
+    app.post('/create-payment-intent', async (req, res) => {
+        const { price } = req.body;
+        const amount = parseInt(price * 100);
+        // console.log(amount, 'amount inside the intent')
+  
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: 'usd',
+          payment_method_types: ['card']
+        });
+  
+        res.send({
+          clientSecret: paymentIntent.client_secret
+        })
+    });
+
+    // send payments
+    app.post('/payments', async (req, res) => {
+        const payment = req.body;
+        const paymentResult = await paymentCollection.insertOne(payment);
+        // console.log('payment info', paymentResult)
+
+        const userEmail = payment.email;
+    
+        const updatedUser = await userCollection.updateOne(
+            { email: userEmail, role: 'user' }, 
+            { $set: { role: 'pro user' } },
+        );
+
+        // console.log('User role updated:', updatedUser);
+
+        res.send(paymentResult);
+    })
+
+    // get payments
+    app.get('/payments', async (req, res) => {
+        const result = await paymentCollection.find().toArray();
+        res.send(result);
+    });
 
     // Send a ping to confirm a successful connection
     // await client.db("admin").command({ ping: 1 });
