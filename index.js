@@ -34,7 +34,7 @@ const client = new MongoClient(uri, {
 // verify token
 const verifyToken = async (req, res, next) => {
     const token = req.cookies?.token
-    console.log(token)
+    // console.log(token)
     if (!token) {
       return res.status(401).send({ message: 'unauthorized access' })
     }
@@ -200,7 +200,7 @@ async function run() {
                 {
                     $group: {
                         _id: '$title',
-                        totalVotes: { $sum: 1 }
+                        totalVotes: { $sum: 1 },
                     }
                 }
             ]).toArray();
@@ -210,6 +210,7 @@ async function run() {
                 const votesCount = vote ? vote.totalVotes : 0;
                 return { ...survey, votes: votesCount };
             });
+            
     
             res.send(result);
         } catch (error) {
@@ -314,8 +315,8 @@ async function run() {
                 return res.status(200).json({ message: 'updated successfully' });
             }
     
-            // If the user hasn't participated yet, insert the new entry
             const result = await participantCollection.insertOne(participantSurvey);
+            
             res.send(result);
         } catch (error) {
             console.log(error);
@@ -358,7 +359,7 @@ async function run() {
     });
 
 
-    app.get('/user-votes', verifyToken, async (req, res) => {
+    app.get('/vote', verifyToken, async (req, res) => {
         const voteCounts = await participantCollection.aggregate([
             {
                 $group: {
