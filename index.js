@@ -21,7 +21,7 @@ app.use(cookieParser());
 
 // MongoDB connection uri
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.vlh5tw1.mongodb.net/?retryWrites=true&w=majority`;
-
+  
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
@@ -46,7 +46,7 @@ const verifyToken = async (req, res, next) => {
       req.user = decoded
       next()
     })
-  }
+}
 
 async function run() {
   try {
@@ -223,7 +223,7 @@ async function run() {
         const email = req.params.email
         const result = await surveyCollection.find({ 'surveyor': email }).toArray()
         res.send(result)
-      })
+    })
 
     // get single survey
     app.get('/surveys/:id', async(req, res) => {
@@ -269,8 +269,8 @@ async function run() {
         }
     })
 
-     // update survey status
-     app.patch('/surveys/admin/:id', verifyToken, verifyAdmin, async (req, res) => {
+    // update survey status
+    app.patch('/surveys/admin/:id', verifyToken, verifyAdmin, async (req, res) => {
         const id = req.params.id;
         const filter = { _id: new ObjectId(id) };
         const updatedDoc = {
@@ -348,7 +348,7 @@ async function run() {
     });
 
     // get specific comment
-    app.get('/comments/:surveyId', verifyToken, async (req, res) => {
+    app.get('/comments/:surveyId', async (req, res) => {
         try {
             const surveyId = req.params.surveyId;
             const result = await commentCollection.find({ 'surveyId': surveyId }).toArray();
@@ -357,7 +357,6 @@ async function run() {
             console.log(error);
         }
     });
-
 
     app.get('/vote', verifyToken, async (req, res) => {
         const voteCounts = await participantCollection.aggregate([
