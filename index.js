@@ -59,6 +59,28 @@ async function run() {
     const commentCollection = client.db('outPollDB').collection('comments');
     const paymentCollection = client.db("outPollDB").collection("payments");
 
+    // Role verification middlewares
+    // For admin
+    const verifyAdmin = async (req, res, next) => {
+        const user = req.user
+        // console.log('user from verify admin', user)
+        const query = { email: user?.email }
+        const result = await userCollection.findOne(query)
+        if (!result || result?.role !== 'admin')
+          return res.status(401).send({ message: 'unauthorized access' })
+        next()
+      }
+  
+    // For surveyor
+    const verifySurveyor = async (req, res, next) => {
+        const user = req.user
+        const query = { email: user?.email }
+        const result = await userCollection.findOne(query)
+        if (!result || result?.role !== 'surveyor')
+          return res.status(401).send({ message: 'unauthorized access' })
+        next()
+    }
+
     // auth related api
     app.post('/jwt', async (req, res) => {
         try {
@@ -110,8 +132,16 @@ async function run() {
     });
 
     // get all users
-    app.get('/users', async (req, res) => {
-        const result = await userCollection.find().toArray();
+    app.get('/users', verifyToken, verifyAdmin, async (req, res) => {
+        let queryObj = {}
+
+        const role = req.query.role;
+    
+        if (role) {
+            queryObj.role = role;
+        }
+
+        const result = await userCollection.find(queryObj).toArray();
         res.send(result);
     });
 
@@ -123,7 +153,7 @@ async function run() {
     })
 
     // update user role
-    app.patch('/users/admin/:id', verifyToken, async (req, res) => {
+    app.patch('/users/admin/:id', verifyToken, verifyAdmin, async (req, res) => {
         const id = req.params.id;
         const filter = { _id: new ObjectId(id) };
         const updatedDoc = {
@@ -151,12 +181,9 @@ async function run() {
     app.get('/surveys', async (req, res) => {
         try {
             let queryObj = {}
-            let sortObj = {}
     
             const title = req.query.title;
             const category = req.query.category;
-            const sortField = req.query.sortField;
-            const sortOrder = req.query.sortOrder;
     
             if (title) {
                 queryObj.title = title;
@@ -166,11 +193,7 @@ async function run() {
                 queryObj.category = category;
             }
     
-            if (sortField && sortOrder) {
-                sortObj[sortField] = sortOrder;
-            }
-    
-            const cursor = surveyCollection.find(queryObj).sort(sortObj);
+            const cursor = surveyCollection.find(queryObj);
             const surveys = await cursor.toArray();
     
             const voteCounts = await participantCollection.aggregate([
@@ -195,7 +218,7 @@ async function run() {
     });
 
     // get survey for surveyor
-    app.get('/surveys/surveyor/:email', async (req, res) => {
+    app.get('/surveys/surveyor/:email', verifyToken, verifySurveyor, async (req, res) => {
         const email = req.params.email
         const result = await surveyCollection.find({ 'surveyor': email }).toArray()
         res.send(result)
@@ -215,7 +238,7 @@ async function run() {
     })
 
     // update surveys
-    app.put('/surveys/:id', async(req, res) => {
+    app.put('/surveys/:id', verifyToken, verifySurveyor, async(req, res) => {
         try {
             const id = req.params.id;
             const filter = {_id: new ObjectId(id)}
@@ -246,7 +269,7 @@ async function run() {
     })
 
      // update survey status
-     app.patch('/surveys/admin/:id', verifyToken, async (req, res) => {
+     app.patch('/surveys/admin/:id', verifyToken, verifyAdmin, async (req, res) => {
         const id = req.params.id;
         const filter = { _id: new ObjectId(id) };
         const updatedDoc = {
@@ -300,22 +323,10 @@ async function run() {
     });
     
     // get all participants
-    app.get('/participants', async (req, res) => {
+    app.get('/participants', verifyToken, async (req, res) => {
         const result = await participantCollection.find().toArray();
         res.send(result);
     });
-
-    // get single participants
-    app.get('/participants/:email', async(req, res) => {
-        try {
-            const email = req.params.email;
-            const result = await participantCollection.findOne({ 'participant_email': email});
-            res.send(result);
-        }
-        catch(error) {
-            console.log(error)
-        }
-    })
 
     // send comments
     app.post('/comments', async (req, res) => {
@@ -330,13 +341,13 @@ async function run() {
     })
 
     // get all comments
-    app.get('/comments', async (req, res) => {
+    app.get('/comments', verifyToken, verifySurveyor, async (req, res) => {
         const result = await commentCollection.find().toArray();
         res.send(result);
     });
 
     // get specific comment
-    app.get('/comments/:surveyId', async (req, res) => {
+    app.get('/comments/:surveyId', verifyToken, async (req, res) => {
         try {
             const surveyId = req.params.surveyId;
             const result = await commentCollection.find({ 'surveyId': surveyId }).toArray();
@@ -404,7 +415,7 @@ async function run() {
     })
 
     // payment intent
-    app.post('/create-payment-intent', async (req, res) => {
+    app.post('/create-payment-intent', verifyToken, async (req, res) => {
         const { price } = req.body;
         const amount = parseInt(price * 100);
         // console.log(amount, 'amount inside the intent')
@@ -421,7 +432,7 @@ async function run() {
     });
 
     // send payments
-    app.post('/payments', async (req, res) => {
+    app.post('/payments', verifyToken, async (req, res) => {
         const payment = req.body;
         const paymentResult = await paymentCollection.insertOne(payment);
         // console.log('payment info', paymentResult)
@@ -439,7 +450,7 @@ async function run() {
     })
 
     // get payments
-    app.get('/payments', async (req, res) => {
+    app.get('/payments', verifyToken, verifyAdmin, async (req, res) => {
         const result = await paymentCollection.find().toArray();
         res.send(result);
     });
