@@ -152,13 +152,26 @@ async function run() {
         res.send(result)
     })
 
-    // update user role
-    app.patch('/users/admin/:id', verifyToken, verifyAdmin, async (req, res) => {
+    // update user to surveyor role
+    app.patch('/users/surveyor/:id', verifyToken, verifyAdmin, async (req, res) => {
         const id = req.params.id;
         const filter = { _id: new ObjectId(id) };
         const updatedDoc = {
             $set: {
             role: 'surveyor'
+            }
+        }
+        const result = await userCollection.updateOne(filter, updatedDoc);
+        res.send(result);
+    })
+
+    // update user to admin role
+    app.patch('/users/admin/:id', verifyToken, verifyAdmin, async (req, res) => {
+        const id = req.params.id;
+        const filter = { _id: new ObjectId(id) };
+        const updatedDoc = {
+            $set: {
+            role: 'admin'
             }
         }
         const result = await userCollection.updateOne(filter, updatedDoc);
