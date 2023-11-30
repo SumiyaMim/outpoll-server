@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const mongoose = require('mongoose');
 require('dotenv').config();
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
@@ -21,7 +22,14 @@ app.use(cookieParser());
 
 // MongoDB connection uri
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.vlh5tw1.mongodb.net/?retryWrites=true&w=majority`;
-  
+
+mongoose.connect(uri, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+});
+
+const db = mongoose.connection;
+
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
@@ -56,8 +64,19 @@ async function run() {
     const userCollection = client.db('outPollDB').collection('users');
     const surveyCollection = client.db('outPollDB').collection('surveys');
     const participantCollection = client.db('outPollDB').collection('participants');
-    const commentCollection = client.db('outPollDB').collection('comments');
     const paymentCollection = client.db("outPollDB").collection("payments");
+
+    const commentSchema = new mongoose.Schema({
+        surveyId: String,
+        comment: String,
+        title: String,
+        timestamp: String,
+        participant_email: String,
+        participant_name: String,
+        participant_role: String,
+    }, { versionKey: false });
+    
+    const Comment = mongoose.model('Comment', commentSchema);    
 
     // Role verification middlewares
     // For admin
@@ -345,27 +364,31 @@ async function run() {
     // send comments
     app.post('/comments', async (req, res) => {
         try {
-             const commentSurvey = req.body;
-             const result = await commentCollection.insertOne(commentSurvey);
-             res.send(result);
+            const commentSurvey = req.body;
+            const newComment = new Comment(commentSurvey);
+            const result = await newComment.save();
+            res.send(result);
+        } catch (error) {
+            console.log(error);
         }
-        catch(error) {
-         console.log(error)
-        }
-    })
+    });
 
     // get all comments
     app.get('/comments', verifyToken, verifySurveyor, async (req, res) => {
-        const result = await commentCollection.find().toArray();
-        res.send(result);
+        try {
+            const comments = await Comment.find();
+            res.send(comments);
+        } catch (error) {
+            console.log(error);
+        }
     });
 
     // get specific comment
     app.get('/comments/:surveyId', async (req, res) => {
         try {
             const surveyId = req.params.surveyId;
-            const result = await commentCollection.find({ 'surveyId': surveyId }).toArray();
-            res.send(result);
+            const comments = await Comment.find({ 'surveyId': surveyId });
+            res.send(comments);
         } catch (error) {
             console.log(error);
         }
